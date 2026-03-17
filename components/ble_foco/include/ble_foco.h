@@ -17,6 +17,7 @@ typedef struct {
     void (*on_mode_change)(uint8_t mode);
     void (*on_connect)(void);
     void (*on_disconnect)(void);
+    void (*on_white_change)(uint16_t kelvin);
 } ble_foco_callbacks_t;
 
 /**
@@ -66,6 +67,13 @@ esp_err_t ble_foco_update_mode(uint8_t mode);
  * @brief Obtiene los valores actuales del foco
  */
 void ble_foco_get_current(uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *brightness, uint8_t *mode);
+
+/**
+ * @brief Actualiza el valor de temperatura de blanco en el servidor GATT
+ * @param kelvin Temperatura en Kelvin (2700-6500)
+ * @return ESP_OK si éxito
+ */
+esp_err_t ble_foco_update_white(uint16_t kelvin);
 
 #ifdef __cplusplus
 }

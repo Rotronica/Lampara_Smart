@@ -3,4 +3,5 @@ idf_component_register(SRCS "main.c"
                     REQUIRES ble_foco 
                             led_controller 
                             led_color  # ← DEPENDENCIAS DE TU CÓDIGO
+                            led_white
                     )

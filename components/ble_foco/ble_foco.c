@@ -32,6 +32,8 @@ enum {
     IDX_CHAR_BRILLO_VAL,
     IDX_CHAR_MODO_DECL,
     IDX_CHAR_MODO_VAL,
+    IDX_CHAR_WHITE_DECL,
+    IDX_CHAR_WHITE_VAL,
     FOCO_IDX_NB
 };
 
@@ -41,20 +43,23 @@ static uint8_t adv_config_done = 0;
 // ==================== VALORES ACTUALES ====================
 static uint8_t current_color[3] = {255, 255, 255};
 static uint8_t current_brightness = 100;
+static uint16_t current_white = 2700;
 static uint8_t current_mode = 0;
 
 // ==================== CALLBACKS DE USUARIO ====================
 static ble_foco_callbacks_t user_callbacks = {0};
 
 // ==================== UUIDs ====================
-static const uint16_t GATTS_SERVICE_UUID_FOCO      = 0x00FF;
-static const uint16_t GATTS_CHAR_UUID_COLOR        = 0xFF01;
-static const uint16_t GATTS_CHAR_UUID_BRILLO       = 0xFF02;
-static const uint16_t GATTS_CHAR_UUID_MODO         = 0xFF03;
+static const uint16_t GATTS_SERVICE_UUID_FOCO       = 0x00FF;
+static const uint16_t GATTS_CHAR_UUID_COLOR         = 0xFF01;
+static const uint16_t GATTS_CHAR_UUID_BRILLO        = 0xFF02;
+static const uint16_t GATTS_CHAR_UUID_MODO          = 0xFF03;
+// Nuevo UUID
+static const uint16_t GATTS_CHAR_UUID_WHITE         = 0xFF04;  // Temperatura blanco
 
-static const uint16_t primary_service_uuid         = ESP_GATT_UUID_PRI_SERVICE;
-static const uint16_t character_declaration_uuid   = ESP_GATT_UUID_CHAR_DECLARE;
-static const uint8_t char_prop_read_write = ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ;
+static const uint16_t primary_service_uuid          = ESP_GATT_UUID_PRI_SERVICE;
+static const uint16_t character_declaration_uuid    = ESP_GATT_UUID_CHAR_DECLARE;
+static const uint8_t char_prop_read_write           = ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ;
 
 // ==================== PREPARE WRITE ====================
 typedef struct {
@@ -154,6 +159,19 @@ static const esp_gatts_attr_db_t foco_gatt_db[FOCO_IDX_NB] = {
          ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,
          1, sizeof(current_mode), (uint8_t *)&current_mode}
     },
+    [IDX_CHAR_WHITE_DECL] = {
+        {ESP_GATT_AUTO_RSP},
+        {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ,
+         CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, 
+         (uint8_t *)&char_prop_read_write}
+    },
+    [IDX_CHAR_WHITE_VAL] = {
+        {ESP_GATT_AUTO_RSP},
+        {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_WHITE, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE,  // Permisos
+        2,                                         // Longitud máxima (2 bytes para uint16_t)
+        sizeof(current_white),                     // Longitud inicial
+        (uint8_t *)&current_white}
+    }
 };
 
 // ==================== FUNCIONES AUXILIARES ====================
@@ -334,6 +352,17 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event,
             if (param->write.need_rsp) {
                 esp_ble_gatts_send_response(gatts_if, param->write.conn_id,
                                            param->write.trans_id, ESP_GATT_OK, NULL);
+            }
+
+            // NUEVO: Escritura en WHITE
+            else if (handle == foco_handle_table[IDX_CHAR_WHITE_VAL] && len >= 2) {
+                uint16_t kelvin = data[0] | (data[1] << 8);  // Convertir 2 bytes a uint16_t
+                if (kelvin >= 2700 && kelvin <= 6500) {
+                    current_white = kelvin;
+                    if (user_callbacks.on_white_change) {
+                        user_callbacks.on_white_change(kelvin);
+                    }
+                }
             }
             break;
         }
@@ -543,4 +572,29 @@ void ble_foco_get_current(uint8_t *r, uint8_t *g, uint8_t *b, uint8_t *brightnes
     if (b) *b = current_color[2];
     if (brightness) *brightness = current_brightness;
     if (mode) *mode = current_mode;
+}
+
+//Nueva funcion led_white
+esp_err_t ble_foco_update_white(uint16_t kelvin)
+{
+    // Validar rango
+    if (kelvin < 2700) kelvin = 2700;
+    if (kelvin > 6500) kelvin = 6500;
+    
+    // Actualizar variable global
+    current_white = kelvin;
+    
+    // Actualizar valor en el servidor GATT
+    // El handle IDX_CHAR_WHITE_VAL debe estar disponible
+    esp_err_t ret = esp_ble_gatts_set_attr_value(
+        foco_handle_table[IDX_CHAR_WHITE_VAL],  // handle de la característica
+        2,                                       // longitud en bytes (uint16_t)
+        (uint8_t*)&kelvin                         // valor a escribir
+    );
+    
+    if (ret == ESP_OK) {
+        ESP_LOGD(TAG, "Valor de blanco actualizado en GATT: %dK", kelvin);
+    }
+    
+    return ret;
 }
