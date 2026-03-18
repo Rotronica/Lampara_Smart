@@ -4,4 +4,5 @@ idf_component_register(SRCS "main.c"
                             led_controller 
                             led_color  # ← DEPENDENCIAS DE TU CÓDIGO
                             led_white
+                            led_modes
                     )

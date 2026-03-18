@@ -54,7 +54,6 @@ static const uint16_t GATTS_SERVICE_UUID_FOCO       = 0x00FF;
 static const uint16_t GATTS_CHAR_UUID_COLOR         = 0xFF01;
 static const uint16_t GATTS_CHAR_UUID_BRILLO        = 0xFF02;
 static const uint16_t GATTS_CHAR_UUID_MODO          = 0xFF03;
-// Nuevo UUID
 static const uint16_t GATTS_CHAR_UUID_WHITE         = 0xFF04;  // Temperatura blanco
 
 static const uint16_t primary_service_uuid          = ESP_GATT_UUID_PRI_SERVICE;
@@ -342,10 +341,14 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event,
                     }
                 }
             }
-            else if (handle == foco_handle_table[IDX_CHAR_MODO_VAL] && len >= 1) {
+            else if (handle == foco_handle_table[IDX_CHAR_MODO_VAL] && len >= 2) {
                 current_mode = data[0];
+                uint8_t speed = data[1];
+                
+                if (speed > 100) speed = 100;
+                
                 if (user_callbacks.on_mode_change) {
-                    user_callbacks.on_mode_change(data[0]);
+                    user_callbacks.on_mode_change(data[0], speed);
                 }
             }
 

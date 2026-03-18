@@ -5,6 +5,7 @@
 #include "led_color.h"
 #include "ble_foco.h"
 #include "led_white.h"
+#include "led_modes.h"
 
 static const char *TAG = "MAIN";
 
@@ -35,6 +36,53 @@ static void on_white_change(uint16_t kelvin)
     led_white_set_temperature(kelvin);
 }
 
+// Callback para registrar los modos escogidos
+static void on_mode_change(uint8_t mode, uint8_t speed)
+{
+    ESP_LOGI(TAG, "🎛️ Modo: %d, Velocidad: %d", mode, speed);
+    
+    // Detener modo anterior si lo hay
+    if (led_modes_is_active()) {
+        led_modes_stop();
+        vTaskDelay(pdMS_TO_TICKS(100));  // Pequeña pausa para asegurar limpieza
+    }
+    
+    // Si es modo sólido (0), no hacer nada especial
+    if (mode == 0) {
+        ESP_LOGI(TAG, "Modo sólido activado");
+        return;
+    }
+    
+    // Configurar el modo seleccionado
+    led_mode_config_t config = {
+        .speed = speed,
+        .brightness = led_controller_get_brightness(),
+        .kelvin = 4000  // valor por defecto
+    };
+    
+    // Obtener último color si está disponible
+    uint8_t r, g, b;
+    led_color_get_current(&r, &g, &b);
+    config.color_r = r;
+    config.color_g = g;
+    config.color_b = b;
+    
+    // Validar que el modo esté en rango
+    led_mode_t led_mode = mode;  // Restar 1 porque modo 0 es sólido
+    if (led_mode >= LED_MODE_MAX) {
+        ESP_LOGE(TAG, "Modo inválido: %d", mode);
+        return;
+    }
+    
+    // Iniciar modo
+    esp_err_t ret = led_modes_start(led_mode, &config);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Modo %d iniciado correctamente", led_mode);
+    } else {
+        ESP_LOGE(TAG, "Error iniciando modo %d", led_mode);
+    }
+}
+
 // Callback para registrar si se conecto el cliente 
 static void on_connect(void)
 {
@@ -49,6 +97,10 @@ static void on_connect(void)
 static void on_disconnect(void)
 {
     ESP_LOGI(TAG, "📱 Cliente desconectado");
+    // Opcional: detener cualquier modo activo al desconectarse
+    if (led_modes_is_active()) {
+        led_modes_stop();
+    }
 }
 
 void app_main(void)
@@ -63,17 +115,17 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(led_controller_init(&led_base_config));
 
-    // 2. Inicializar módulo de color
+    // 2. Inicializar módulos de alto nivel
     led_color_init();
-    // Inicializacion del modo color blanco
     led_white_init();
+    led_modes_init();  // ← IMPORTANTE: Inicializar el módulo de modos
 
     // 3. Configurar TODOS los callbacks BLE
     ble_foco_callbacks_t cbs = {
         .on_color_change = on_color_change,
-        .on_brightness_change = on_brightness_change,  // ← AHORA SÍ
-        .on_mode_change = NULL,          // Por implementar
-        .on_white_change = on_white_change,  // ← NUEVO
+        .on_brightness_change = on_brightness_change,
+        .on_mode_change = on_mode_change,
+        .on_white_change = on_white_change,
         .on_connect = on_connect,
         .on_disconnect = on_disconnect
     };
@@ -83,6 +135,21 @@ void app_main(void)
     ESP_ERROR_CHECK(ble_foco_init());
 
     ESP_LOGI(TAG, "✅ Sistema listo. Busca 'ESP_FOCO_TEST' en tu app BLE");
+
+    // Pequeña prueba de modos al inicio (opcional, puedes comentarlo después)
+    ESP_LOGI(TAG, "Probando modo ARCOÍRIS durante 5 segundos...");
+    led_mode_config_t test_config = {
+        .speed = 50,
+        .brightness = 80,
+        .color_r = 255,
+        .color_g = 0,
+        .color_b = 0,
+        .kelvin = 4000
+    };
+    led_modes_start(LED_MODE_RAINBOW, &test_config);
+    vTaskDelay(pdMS_TO_TICKS(5000));
+    led_modes_stop();
+    led_color_set_all(0, 0, 0);  // Apagar
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));

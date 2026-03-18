@@ -14,10 +14,10 @@ extern "C" {
 typedef struct {
     void (*on_color_change)(uint8_t r, uint8_t g, uint8_t b);
     void (*on_brightness_change)(uint8_t brightness);
-    void (*on_mode_change)(uint8_t mode);
     void (*on_connect)(void);
     void (*on_disconnect)(void);
     void (*on_white_change)(uint16_t kelvin);
+    void (*on_mode_change)(uint8_t mode, uint8_t speed);  // Modificar para incluir velocidad
 } ble_foco_callbacks_t;
 
 /**
