@@ -68,7 +68,7 @@ static void on_mode_change(uint8_t mode, uint8_t speed)
     config.color_b = b;
     
     // Validar que el modo esté en rango
-    led_mode_t led_mode = mode;  // Restar 1 porque modo 0 es sólido
+    led_mode_t led_mode = mode;  
     if (led_mode >= LED_MODE_MAX) {
         ESP_LOGE(TAG, "Modo inválido: %d", mode);
         return;
