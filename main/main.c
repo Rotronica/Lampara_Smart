@@ -1,11 +1,12 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
-#include "led_controller.h"
+#include "ws2812_driver.h"      // Driver de hardware
+#include "led_controller.h"      // Lógica de control
 #include "led_color.h"
-#include "ble_foco.h"
 #include "led_white.h"
 #include "led_modes.h"
+#include "ble_foco.h"
 
 static const char *TAG = "MAIN";
 
@@ -14,19 +15,19 @@ static const char *TAG = "MAIN";
 
 // Callbacks BLE
 
-// Calleback para los colores
+// Callback para los colores
 static void on_color_change(uint8_t r, uint8_t g, uint8_t b)
 {
     ESP_LOGI(TAG, "🎨 Color recibido: RGB(%d,%d,%d)", r, g, b);
-    led_color_set_all(r, g, b);  // led_color ya usa led_controller internamente
+    led_color_set_all(r, g, b);
 }
 
 // Callback para el brillo
 static void on_brightness_change(uint8_t brightness)
 {
     ESP_LOGI(TAG, "💡 Brillo recibido: %d%%", brightness);
-    led_controller_set_brightness(brightness);  // ← Controla el brillo global
-    led_controller_update();  // Refresca los LEDs con el nuevo brillo
+    led_controller_set_brightness(brightness);
+    led_controller_update();
 }
 
 // Callback para registrar el color blanco
@@ -44,7 +45,7 @@ static void on_mode_change(uint8_t mode, uint8_t speed)
     // Detener modo anterior si lo hay
     if (led_modes_is_active()) {
         led_modes_stop();
-        vTaskDelay(pdMS_TO_TICKS(100));  // Pequeña pausa para asegurar limpieza
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
     
     // Si es modo sólido (0), no hacer nada especial
@@ -57,7 +58,7 @@ static void on_mode_change(uint8_t mode, uint8_t speed)
     led_mode_config_t config = {
         .speed = speed,
         .brightness = led_controller_get_brightness(),
-        .kelvin = 4000  // valor por defecto
+        .kelvin = 4000
     };
     
     // Obtener último color si está disponible
@@ -68,7 +69,7 @@ static void on_mode_change(uint8_t mode, uint8_t speed)
     config.color_b = b;
     
     // Validar que el modo esté en rango
-    led_mode_t led_mode = mode;  
+    led_mode_t led_mode = mode;
     if (led_mode >= LED_MODE_MAX) {
         ESP_LOGE(TAG, "Modo inválido: %d", mode);
         return;
@@ -87,7 +88,7 @@ static void on_mode_change(uint8_t mode, uint8_t speed)
 static void on_connect(void)
 {
     ESP_LOGI(TAG, "📱 Cliente conectado");
-    // Opcional: hacer un efecto de bienvenida
+    // Efecto de bienvenida
     led_color_set_all(0, 255, 0);  // Verde
     vTaskDelay(pdMS_TO_TICKS(500));
     led_color_set_all(0, 0, 0);    // Apagar
@@ -97,7 +98,6 @@ static void on_connect(void)
 static void on_disconnect(void)
 {
     ESP_LOGI(TAG, "📱 Cliente desconectado");
-    // Opcional: detener cualquier modo activo al desconectarse
     if (led_modes_is_active()) {
         led_modes_stop();
     }
@@ -107,20 +107,33 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "=== FOCO INTELIGENTE ===");
 
-    // 1. Inicializar controlador base de LEDs
-    led_controller_config_t led_base_config = {
+    // ==================== INICIALIZACIÓN ====================
+    
+    // 1. Inicializar DRIVER de hardware (WS2812)
+    //    Este componente maneja el hardware RMT directamente
+    ws2812_driver_config_t driver_config = {
         .gpio_pin = LED_GPIO,
         .num_leds = NUM_LEDS,
-        .resolution_hz = 10000000
+        .resolution_hz = 10000000      // 10MHz para WS2812
     };
-    ESP_ERROR_CHECK(led_controller_init(&led_base_config));
+    ESP_ERROR_CHECK(ws2812_driver_init(&driver_config));
+    ESP_LOGI(TAG, "✅ Driver WS2812 inicializado");
 
-    // 2. Inicializar módulos de alto nivel
+    // 2. Inicializar CONTROLADOR de lógica
+    //    Este componente maneja brillo y buffer de colores
+    led_controller_config_t led_config = {
+        .num_leds = NUM_LEDS
+    };
+    ESP_ERROR_CHECK(led_controller_init(&led_config));
+    ESP_LOGI(TAG, "✅ Controlador LED inicializado");
+
+    // 3. Inicializar módulos de alto nivel
     led_color_init();
     led_white_init();
-    led_modes_init();  // ← IMPORTANTE: Inicializar el módulo de modos
+    led_modes_init();
+    ESP_LOGI(TAG, "✅ Módulos de alto nivel inicializados");
 
-    // 3. Configurar TODOS los callbacks BLE
+    // 4. Configurar TODOS los callbacks BLE
     ble_foco_callbacks_t cbs = {
         .on_color_change = on_color_change,
         .on_brightness_change = on_brightness_change,
@@ -131,12 +144,14 @@ void app_main(void)
     };
     ble_foco_register_callbacks(&cbs);
 
-    // 4. Inicializar BLE
+    // 5. Inicializar BLE
     ESP_ERROR_CHECK(ble_foco_init());
+    ESP_LOGI(TAG, "✅ BLE inicializado");
 
     ESP_LOGI(TAG, "✅ Sistema listo. Busca 'ESP_FOCO_TEST' en tu app BLE");
 
-    // Pequeña prueba de modos al inicio (opcional, puedes comentarlo después)
+    // ==================== PRUEBA DE MODOS (opcional) ====================
+    // Puedes comentar esta sección si no quieres la prueba automática
     ESP_LOGI(TAG, "Probando modo ARCOÍRIS durante 5 segundos...");
     led_mode_config_t test_config = {
         .speed = 50,
@@ -150,7 +165,9 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(5000));
     led_modes_stop();
     led_color_set_all(0, 0, 0);  // Apagar
+    ESP_LOGI(TAG, "Prueba completada");
 
+    // ==================== BUCLE PRINCIPAL ====================
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }

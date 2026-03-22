@@ -139,12 +139,14 @@ static void mode_night_task(void *pv)
     
     ESP_LOGI(TAG, "🌙 Modo Nocturno iniciado");
     
-    // Configurar luz cálida muy tenue
-    led_controller_set_brightness(10);  // 10% de brillo
-    led_white_set_temperature(2700);    // Cálido
+    // Usar la configuración recibida
+    uint8_t brightness = config->brightness;
+    if (brightness > 20) brightness = 20;  // Limitar a máximo 20% para nocturno
+    
+    led_controller_set_brightness(brightness);
+    led_white_set_temperature(config->kelvin);  // Usar Kelvin configurado
     
     while (1) {
-        // Solo mantener la configuración
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
@@ -155,6 +157,7 @@ static void mode_night_task(void *pv)
 static void mode_storm_task(void *pv)
 {
     led_mode_config_t *config = (led_mode_config_t *)pv;
+    (void)config;  // Por ahora no usamos configuración en tormenta
     
     ESP_LOGI(TAG, "⛈️ Modo Tormenta iniciado");
     
@@ -165,9 +168,10 @@ static void mode_storm_task(void *pv)
         // Esperar tiempo aleatorio (1-5 segundos)
         vTaskDelay(pdMS_TO_TICKS(1000 + (rand() % 4000)));
         
-        // Relámpago
+        // Relámpago - usar brillo configurado
+        uint8_t brightness = config ? config->brightness : 100;
         for (int i = 0; i < led_controller_get_count(); i++) {
-            led_controller_set_color(i, 255, 255, 255);  // Blanco brillante
+            led_controller_set_color(i, brightness, brightness, brightness);
         }
         led_controller_update();
         vTaskDelay(pdMS_TO_TICKS(100));

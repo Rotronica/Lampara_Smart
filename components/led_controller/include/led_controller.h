@@ -9,21 +9,23 @@ extern "C" {
 #endif
 
 /**
- * @brief Configuración del controlador base de LEDs
+ * @brief Configuración del controlador de LEDs
  */
 typedef struct {
-    int gpio_pin;           //!< GPIO donde está conectada la tira de LEDs
     int num_leds;           //!< Número total de LEDs en la tira
-    uint32_t resolution_hz; //!< Resolución del RMT (10MHz recomendado)
 } led_controller_config_t;
 
 /**
- * @brief Inicializa el controlador base de LEDs
+ * @brief Inicializa el controlador de LEDs (requiere driver previamente inicializado)
  */
 esp_err_t led_controller_init(const led_controller_config_t *config);
 
 /**
  * @brief Establece el color de un LED específico (sin actualizar)
+ * @param index Índice del LED
+ * @param r Rojo (0-255)
+ * @param g Verde (0-255)
+ * @param b Azul (0-255)
  */
 esp_err_t led_controller_set_color(int index, uint8_t r, uint8_t g, uint8_t b);
 

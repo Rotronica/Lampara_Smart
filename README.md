@@ -2,9 +2,11 @@
 
 **Autor**: Rodrigo Calle Condori  
 **Fecha**: Marzo 2026  
-**Versión**: 1.3.0  
+**Versión**: 1.4.0  
 
-Control de tira LED WS2812 vía BLE con ESP32. Proyecto desarrollado con arquitectura profesional y modular como base para un producto comercial de iluminación inteligente.
+Control de tira LED WS2812 vía BLE con ESP32. Proyecto desarrollado con **arquitectura profesional por capas** como base para un producto comercial de iluminación inteligente.
+
+## ✨ Características
 
 ### ✅ Implementado
 - Control de color RGB (16 millones de colores)
@@ -17,8 +19,8 @@ Control de tira LED WS2812 vía BLE con ESP32. Proyecto desarrollado con arquite
   - 😌 Relajación (transiciones suaves de colores pastel)
   - 🌙 Nocturno (luz cálida tenue)
   - ⛈️ Tormenta (efecto de relámpagos aleatorios)
-- Comunicación BLE con app móvil (nRF Connect)
-- Arquitectura modular y escalable
+- Comunicación BLE con app móvil (nRF Connect / Flutter)
+- **Arquitectura profesional por capas** (driver → abstracción → dominio → aplicación)
 
 ### ⏳ En desarrollo
 - Sincronización musical
@@ -28,42 +30,50 @@ Control de tira LED WS2812 vía BLE con ESP32. Proyecto desarrollado con arquite
 
 ```mermaid
 graph TD
-    main[main.c<br/>orquestador de componentes] --> color[led_color<br/>RGB]
+    main[main.c<br/>orquestador de componentes] --> ble[ble_foco<br/>servicio BLE]
+    main --> color[led_color<br/>RGB]
     main --> white[led_white<br/>temp. color]
     main --> modes[led_modes<br/>escenas]
     main --> music[led_music<br/>ritmo]
     
-    color --> controller[led_controller<br/>hardware RMT]
+    ble --> |callbacks| main
+    
+    color --> controller[led_controller<br/>abstracción hardware]
     white --> controller
     modes --> controller
     music --> controller
     
-    controller --> encoder[led_strip_encoder<br/>driver RMT]
+    controller --> driver[ws2812_driver<br/>driver WS2812]
+    
+    driver --> encoder[encoder integrado<br/>conversión a pulsos RMT]
+    
+    encoder --> rmt[RMT periférico<br/>ESP32 hardware]
 ```
+
 
 ## 📦 Componentes Implementados
 
-| Componente | Descripción | Estado |
-|:---|:---|:---|
-| **`led_controller`** | Capa base de hardware. Controla LEDs WS2812 vía RMT, gestiona brillo global y buffer de píxeles. | ✅ Estable |
-| **`led_color`** | Módulo de alto nivel para control RGB. Proporciona API intuitiva para colores sólidos. | ✅ Estable |
-| **`led_white`** | Módulo para control de temperatura de color blanco (2700K-6500K). Convierte Kelvin a RGB usando algoritmo de Tanner Helland. | ✅ Estable |
-| **`led_modes`** | Efectos y escenas preprogramadas con velocidad ajustable. | ✅ Estable |
-| **`led_strip_encoder`** | Driver de bajo nivel para WS2812. Convierte bytes a señales RMT precisas. | ✅ Estable |
-| **`ble_foco`** | Servicio BLE personalizado con UUIDs para color, brillo, modo y temperatura blanca. | ✅ Estable |
-| **`led_music`** | Sincronización con ritmo musical. | ⏳ Futuro |
+| Capa | Componente | Descripción | Estado |
+|:---|:---|:---|:---|
+| **Driver** | `ws2812_driver` | Driver unificado para WS2812. Configura RMT, maneja buffer DMA y convierte bytes a pulsos mediante encoder integrado. | ✅ Estable |
+| **Abstracción HW** | `led_controller` | Control de brillo global y buffer de colores RGB. Aplica brillo y gestiona estado. | ✅ Estable |
+| **Dominio** | `led_color` | Control de color RGB de alto nivel. API intuitiva para colores sólidos. | ✅ Estable |
+| **Dominio** | `led_white` | Control de temperatura de color blanco (2700K-6500K). Convierte Kelvin a RGB usando algoritmo de Tanner Helland. | ✅ Estable |
+| **Dominio** | `led_modes` | Efectos y escenas preprogramadas con velocidad ajustable. | ✅ Estable |
+| **Aplicación** | `ble_foco` | Servicio BLE personalizado con UUIDs para color, brillo, modo y temperatura blanca. | ✅ Estable |
+| **Futuro** | `led_music` | Sincronización con ritmo musical. | ⏳ Futuro |
 
 ## 🎮 Modos de Operación
 
 | Modo | ID | Descripción | Comportamiento |
 |:---|:---|:---|:---|
 | **Sólido** | 0 | Color fijo | Muestra el último color seleccionado (por color o blanco) |
-| **Arcoíris** | 1 | 🌈 | Transición cíclica de colores |
+| **Arcoíris** | 1 | 🌈 | Transición cíclica de colores (velocidad configurable) |
 | **Atardecer** | 2 | 🌅 | Transición suave entre 2700K y 6500K |
-| **Fiesta** | 3 | 🎉 | Colores aleatorios rápidos |
+| **Fiesta** | 3 | 🎉 | Colores aleatorios rápidos (velocidad configurable) |
 | **Relajación** | 4 | 😌 | Transiciones lentas de colores pastel |
-| **Nocturno** | 5 | 🌙 | Luz cálida (2700K) a bajo brillo |
-| **Tormenta** | 6 | ⛈️ | Relámpagos blancos aleatorios |
+| **Nocturno** | 5 | 🌙 | Luz cálida tenue (brillo y temperatura configurables) |
+| **Tormenta** | 6 | ⛈️ | Relámpagos blancos aleatorios (intensidad configurable) |
 
 ## 🔧 Hardware Requerido
 - ESP32 (cualquier variante)
@@ -98,7 +108,7 @@ graph TD
 | Nocturno | `05` | `32` | `05 32` |
 | Tormenta | `06` | `32` | `06 32` |
 
-### 📝 Notas sobre temperatura de color (modo led white):
+### 📝 Notas sobre temperatura de color (modo blanco):
 - **2700K**: Muy cálido (ámbar) - `8C 0A` en hexadecimal
 - **4000K**: Neutro - `A0 0F` en hexadecimal
 - **6500K**: Muy frío (azul) - `64 19` en hexadecimal
@@ -130,41 +140,59 @@ idf.py flash monitor
 ```
 foco_inteligente/
 ├── components/
-│   ├── led_controller/          # Capa base de hardware
+│   ├── ws2812_driver/               # DRIVER unificado WS2812
+│   │   ├── include/
+│   │   │   └── ws2812_driver.h
+│   │   ├── ws2812_driver.c          # Configura RMT + encoder integrado
+│   │   └── CMakeLists.txt
+│   ├── led_controller/              # CAPA DE ABSTRACCIÓN
 │   │   ├── include/
 │   │   │   └── led_controller.h
-│   │   ├── led_controller.c
+│   │   ├── led_controller.c         # Brillo, buffer RGB
 │   │   └── CMakeLists.txt
-│   ├── led_color/                # Control RGB
+│   ├── led_color/                   # CAPA DE DOMINIO
 │   │   ├── include/
 │   │   │   └── led_color.h
 │   │   ├── led_color.c
 │   │   └── CMakeLists.txt
-│   ├── led_white/                 # Control blanco Kelvin
+│   ├── led_white/                   # CAPA DE DOMINIO
 │   │   ├── include/
 │   │   │   └── led_white.h
 │   │   ├── led_white.c
 │   │   └── CMakeLists.txt
-│   ├── led_modes/                 # Modos y escenas
+│   ├── led_modes/                   # CAPA DE DOMINIO
 │   │   ├── include/
 │   │   │   └── led_modes.h
 │   │   ├── led_modes.c
 │   │   └── CMakeLists.txt
-│   ├── ble_foco/                   # Servicio BLE
-│   │   ├── include/
-│   │   │   └── ble_foco.h
-│   │   ├── ble_foco.c
-│   │   └── CMakeLists.txt
-│   └── led_strip_encoder/        # Driver WS2812
-│       ├── led_strip_encoder.c
-│       └── led_strip_encoder.h
+│   └── ble_foco/                    # COMUNICACIÓN BLE
+│       ├── include/
+│       │   └── ble_foco.h
+│       ├── ble_foco.c
+│       └── CMakeLists.txt
 ├── main/
 │   ├── CMakeLists.txt
-│   └── main.c                    # Orquestador principal
-├── CMakeLists.txt                 # Proyecto raíz
+│   └── main.c                       # Orquestador principal
+├── CMakeLists.txt                   # Proyecto raíz
 └── README.md
 ```
+## 🔄 Flujo de Inicialización
+```
+// 1. Driver de hardware
+ws2812_driver_init(&driver_config);
 
+// 2. Capa de abstracción
+led_controller_init(&led_config);
+
+// 3. Capa de dominio
+led_color_init();
+led_white_init();
+led_modes_init();
+
+// 4. Comunicación BLE
+ble_foco_register_callbacks(&cbs);
+ble_foco_init();
+```
 
 ## 📬 Contacto
 rodrigocallecondori@gmail.com

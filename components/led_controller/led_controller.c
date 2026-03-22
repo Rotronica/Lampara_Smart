@@ -1,21 +1,13 @@
 #include "led_controller.h"
-#include "led_strip_encoder.h"
+#include "ws2812_driver.h"
 #include "esp_log.h"
-#include "esp_err.h"
-#include "driver/rmt_tx.h"
 #include <string.h>
 #include <stdlib.h>
-#include <esp_heap_caps.h>
-#include <portmacro.h>
-
 
 static const char *TAG = "LED_CTRL";
 
-// Estructura interna del controlador
+// Estructura interna del controlador (solo lógica)
 typedef struct {
-    rmt_channel_handle_t rmt_channel;
-    rmt_encoder_handle_t rmt_encoder;
-    uint8_t *pixel_buffer;      // Buffer con brillo aplicado (orden GRB)
     uint8_t *current_colors;    // Colores originales (orden RGB)
     int num_leds;
     uint8_t brightness;
@@ -35,28 +27,30 @@ static void apply_brightness(uint8_t *r, uint8_t *g, uint8_t *b)
     }
 }
 
-static void rgb_to_grb_buffer(int index, uint8_t r, uint8_t g, uint8_t b)
+static void rebuild_driver_buffer(void)
 {
-    if (!s_led || !s_led->pixel_buffer) return;
-    uint8_t *buf = s_led->pixel_buffer + (index * 3);
-    buf[0] = g;
-    buf[1] = r;
-    buf[2] = b;
+    if (!s_led || !s_led->initialized) return;
+
+    for (int i = 0; i < s_led->num_leds; i++) {
+        uint8_t *orig = s_led->current_colors + (i * 3);
+        uint8_t r = orig[0], g = orig[1], b = orig[2];
+        apply_brightness(&r, &g, &b);
+        // El driver espera orden GRB
+        ws2812_driver_set_color(i, g, r, b);
+    }
 }
 
 // ==================== FUNCIONES PÚBLICAS ====================
 
 esp_err_t led_controller_init(const led_controller_config_t *config)
 {
-    ESP_LOGI(TAG, "Inicializando controlador base de LEDs");
+    ESP_LOGI(TAG, "Inicializando controlador de LEDs (lógica)");
 
     if (!config || config->num_leds <= 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
     if (s_led) {
-        led_controller_clear();
-        if (s_led->pixel_buffer) free(s_led->pixel_buffer);
         if (s_led->current_colors) free(s_led->current_colors);
         free(s_led);
     }
@@ -67,66 +61,19 @@ esp_err_t led_controller_init(const led_controller_config_t *config)
     s_led->num_leds = config->num_leds;
     s_led->brightness = 100;
 
-    s_led->pixel_buffer = heap_caps_malloc(config->num_leds * 3, MALLOC_CAP_DMA);
     s_led->current_colors = malloc(config->num_leds * 3);
-
-    if (!s_led->pixel_buffer || !s_led->current_colors) {
+    if (!s_led->current_colors) {
         ESP_LOGE(TAG, "Error reservando memoria");
-        if (s_led->pixel_buffer) free(s_led->pixel_buffer);
-        if (s_led->current_colors) free(s_led->current_colors);
         free(s_led);
         s_led = NULL;
         return ESP_ERR_NO_MEM;
     }
 
-    memset(s_led->pixel_buffer, 0, config->num_leds * 3);
     memset(s_led->current_colors, 0, config->num_leds * 3);
-
-    uint32_t resolution = config->resolution_hz ? config->resolution_hz : 10000000;
-
-    rmt_tx_channel_config_t tx_chan_config = {
-        .clk_src = RMT_CLK_SRC_DEFAULT,
-        .gpio_num = config->gpio_pin,
-        .mem_block_symbols = 64,
-        .resolution_hz = resolution,
-        .trans_queue_depth = 4,
-    };
-
-    esp_err_t ret = rmt_new_tx_channel(&tx_chan_config, &s_led->rmt_channel);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Error creando canal RMT");
-        goto cleanup;
-    }
-
-    led_strip_encoder_config_t encoder_config = {
-        .resolution = resolution,
-    };
-
-    ret = rmt_new_led_strip_encoder(&encoder_config, &s_led->rmt_encoder);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Error creando encoder");
-        rmt_del_channel(s_led->rmt_channel);
-        goto cleanup;
-    }
-
-    ret = rmt_enable(s_led->rmt_channel);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Error habilitando canal");
-        rmt_del_encoder(s_led->rmt_encoder);
-        rmt_del_channel(s_led->rmt_channel);
-        goto cleanup;
-    }
-
     s_led->initialized = true;
-    ESP_LOGI(TAG, "Controlador listo: %d LEDs en GPIO %d", config->num_leds, config->gpio_pin);
-    return ESP_OK;
 
-cleanup:
-    free(s_led->pixel_buffer);
-    free(s_led->current_colors);
-    free(s_led);
-    s_led = NULL;
-    return ret;
+    ESP_LOGI(TAG, "Controlador listo para %d LEDs", config->num_leds);
+    return ESP_OK;
 }
 
 esp_err_t led_controller_set_color(int index, uint8_t r, uint8_t g, uint8_t b)
@@ -139,9 +86,10 @@ esp_err_t led_controller_set_color(int index, uint8_t r, uint8_t g, uint8_t b)
     orig[1] = g;
     orig[2] = b;
 
+    // Reconstruir buffer del driver con el nuevo brillo
     uint8_t ra = r, ga = g, ba = b;
     apply_brightness(&ra, &ga, &ba);
-    rgb_to_grb_buffer(index, ra, ga, ba);
+    ws2812_driver_set_color(index, ga, ra, ba);
 
     return ESP_OK;
 }
@@ -149,13 +97,8 @@ esp_err_t led_controller_set_color(int index, uint8_t r, uint8_t g, uint8_t b)
 esp_err_t led_controller_update(void)
 {
     if (!s_led || !s_led->initialized) return ESP_ERR_INVALID_STATE;
-
-    rmt_transmit_config_t tx_config = { .loop_count = 0 };
-    esp_err_t ret = rmt_transmit(s_led->rmt_channel, s_led->rmt_encoder,
-                                  s_led->pixel_buffer, s_led->num_leds * 3, &tx_config);
-    if (ret != ESP_OK) return ret;
-
-    return rmt_tx_wait_all_done(s_led->rmt_channel, portMAX_DELAY);
+    ws2812_driver_update();
+    return ESP_OK;
 }
 
 esp_err_t led_controller_set_brightness(uint8_t brightness)
@@ -165,12 +108,7 @@ esp_err_t led_controller_set_brightness(uint8_t brightness)
 
     if (s_led->brightness != brightness) {
         s_led->brightness = brightness;
-        for (int i = 0; i < s_led->num_leds; i++) {
-            uint8_t *orig = s_led->current_colors + (i * 3);
-            uint8_t r = orig[0], g = orig[1], b = orig[2];
-            apply_brightness(&r, &g, &b);
-            rgb_to_grb_buffer(i, r, g, b);
-        }
+        rebuild_driver_buffer();
     }
     return ESP_OK;
 }
@@ -184,8 +122,8 @@ esp_err_t led_controller_clear(void)
 {
     if (!s_led || !s_led->initialized) return ESP_ERR_INVALID_STATE;
     memset(s_led->current_colors, 0, s_led->num_leds * 3);
-    memset(s_led->pixel_buffer, 0, s_led->num_leds * 3);
-    return led_controller_update();
+    ws2812_driver_clear();
+    return ESP_OK;
 }
 
 esp_err_t led_controller_get_color(int index, uint8_t *r, uint8_t *g, uint8_t *b)
